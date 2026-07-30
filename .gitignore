@@ -20,12 +20,31 @@ dist/
 .wrangler/
 .nitro/
 
+# Generated artefacts. The trained forecaster and the scoreboard are committed
+# anyway (git add -f): the API reports `degraded` without models/forecaster.pkl,
+# so a fresh clone could not be run without a 3-minute training step first.
+#
+# The PPE vision weights under models/vision/ stay out: they are optional
+# (SENTINEL_VISION is off by default, nothing on the safety path imports them)
+# and they derive from SH17, whose licence does not permit redistribution here.
+models/
+reports/
+data/regulations_local/
+# Downloaded datasets — fetched, not authored. Licences differ per dataset.
+data/external/
+
+# Local onboarding guide — kept out of version control on purpose.
+docs/
+
+# Playwright browser cache
+.cache/
+
 # Model weights and downloaded datasets
 *.pt
 *.pkl
 # ...except the trained forecaster: the API is `degraded` without it, so a
 # fresh clone needs it to run. See industrial-twin/.gitignore.
-!industrial-twin/models/forecaster*.pkl
+!models/forecaster*.pkl
 data/external/
 
 # Scratch
