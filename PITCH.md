@@ -164,3 +164,33 @@ Run COB-B first, then BLF-2. The contrast is the whole argument.
 
 Warm the model with one throwaway run before you present — Ollama evicts idle
 models and the ~35s reload otherwise lands on your first demo node.
+
+### The COB-B run, verified
+
+This is the actual recorded output, so you can narrate it before you click:
+
+```
+permit: REJECTED   priority: CRITICAL   interlocks tripped: 2
+
+Gemma: "The hot work permit has been rejected due to elevated combustible gas
+        levels exceeding the limit, and a second interlock triggered by worker
+        density. Immediate action is needed to halt the hot work."
+        confidence 0.95
+
+EXEC  veto_permit          proposed permit_id "COB-B-HW-20241027"
+                           executed as        "HOTWORK-COB-B"
+EXEC  trigger_zone_alarm   LEVEL_3
+EXEC  dispatch_response_team
+                           proposed muster_point "Loading Dock Alpha"
+                           executed as           "primary assembly point"
+```
+
+Two invented identifiers in a single run — a plausible dated permit number and a
+loading dock that does not exist — both replaced before anything executed. The
+console marks those rows **"2 arguments corrected"**.
+
+That is the moment to stop talking and point at the screen:
+
+> "It got the zone right. It got the alarm level right. It got the *reasoning*
+> right. And it still made up a permit number and an assembly point — in the same
+> breath. That's why the gate exists."
