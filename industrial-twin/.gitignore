@@ -1,0 +1,28 @@
+# Generated artefacts
+models/
+reports/
+data/regulations_local/
+
+# Downloaded datasets (SH17 sample imagery etc.) — fetched, not authored.
+# Licences differ per dataset; do not redistribute through this repo.
+data/external/
+# YOLO weights, downloaded on first use
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Env
+.env
+.env.local
+
+# Playwright browser cache
+.cache/
+
+# Local onboarding guide (docs/) — kept out of version control on purpose.
+# Delete this line if you want to share it with a teammate through git.
+docs/

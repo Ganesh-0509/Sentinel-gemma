@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentinel-ai"
+version = "0.1.0"
+description = "SentinelAI — compound industrial safety intelligence"
+requires-python = ">=3.11"
+dependencies = [
+    # Upper bound is load-bearing: numba (a shap dependency) refuses NumPy >= 2.5,
+    # and installing the optional vision extra pulls a newer numpy in. Without
+    # this cap, `pip install .[vision]` silently breaks the SHAP explainer, which
+    # takes PlantService startup -- and the monotonicity guarantee tests -- down
+    # with it.
+    "numpy>=1.26,<2.5",
+    "pandas>=2.1",
+    "scikit-learn>=1.4",
+    "lightgbm>=4.3",
+    "joblib>=1.3",
+    "shap>=0.45",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+agents = ["langgraph>=0.1"]
+gemini = ["google-generativeai>=0.7"]
+# Person detection for CV-derived occupancy. Optional by design: nothing on the
+# safety-critical path imports it, and the API runs on simulated occupancy when
+# it is absent. Enable at runtime with SENTINEL_VISION=1.
+vision = ["ultralytics>=8.3", "numpy<2.5"]
+
+# The package is imported as `sentinel.*` throughout, but lives in `backend/`.
+# This mapping keeps the on-disk folder name while making the imports resolve.
+[tool.setuptools]
+packages = [
+    "sentinel",
+    "sentinel.agents",
+    "sentinel.api",
+    "sentinel.decision",
+    "sentinel.evaluation",
+    "sentinel.geo",
+    "sentinel.llm",
+    "sentinel.ml",
+    "sentinel.rag",
+    "sentinel.rules",
+    "sentinel.sim",
+    "sentinel.vision",
+]
+
+[tool.setuptools.package-dir]
+"sentinel" = "backend"

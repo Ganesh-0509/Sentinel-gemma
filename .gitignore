@@ -1,0 +1,36 @@
+# Secrets — never commit
+.env
+.env.local
+**/.env
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.output/
+.tanstack/
+.wrangler/
+.nitro/
+
+# Model weights and downloaded datasets
+*.pt
+*.pkl
+data/external/
+
+# Scratch
+temp.txt
+*.log
+
+# Local tooling and editor configuration — not part of the deliverable
+.agents/
+.claude/
+AGENTS.md
+.pytest_cache/
