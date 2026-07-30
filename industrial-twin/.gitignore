@@ -1,4 +1,14 @@
-# Generated artefacts
+# Generated artefacts.
+#
+# The trained forecaster and the scoreboard are committed anyway (git add -f):
+# the API reports `degraded` without models/forecaster.pkl, so a fresh clone
+# could not be run without a 3-minute training step first. 3.4 MB is worth
+# not asking a reviewer to build the model before seeing the console.
+#
+# The PPE vision weights under models/vision/ stay out: they are optional
+# (SENTINEL_VISION is off by default, nothing on the safety path imports them)
+# and they are derived from SH17, whose licence does not permit
+# redistribution through this repo.
 models/
 reports/
 data/regulations_local/
