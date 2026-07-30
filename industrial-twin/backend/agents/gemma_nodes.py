@@ -44,18 +44,45 @@ ADVISORY_TOKENS = 260
 def _telemetry_block(state: dict[str, Any]) -> str:
     """The zone as Gemma sees it.
 
-    Prompt tokens are cheap here relative to generation, so this stays explicit
-    and units are spelled out. An unlabelled `12.4` invites the model to read a
-    percentage as a count.
+    Prompt tokens are cheap relative to generation, so this stays explicit and
+    spends them where the model has been observed to go wrong.
+
+    Two things it gets wrong without help. First, `%LEL` is a percentage *of* the
+    lower explosive limit, and a bare "1.78 %LEL" gets read as being at the
+    explosive limit -- runs described a zone at 1.78 against a 5.0 hot-work limit
+    as "above the LEL threshold" and warned of imminent explosion. So the reading
+    is stated with the limits beside it and with the comparison already made.
+
+    Second, `area_class` is an electrical area classification (ZONE_1, ZONE_2),
+    and the model reads it as a place and evacuates "Zone 1". It is labelled as a
+    classification and the zone is named on the same line.
     """
     lead = state.get("lead_time_min")
     permit = (state.get("permit_decision") or {}).get("status", "not assessed")
     interlocks = state.get("interlocks") or []
+    gas = state.get("gas_lel", 0.0)
+    trend = state.get("gas_trend", 0.0)
+
+    # Imported here rather than at module scope: the limits belong to the rule
+    # engine, and reading them from it means the prompt cannot drift from the
+    # threshold the interlocks actually enforce.
+    from sentinel.rules.engine import HOT_WORK_MAX_LEL
+
+    if gas >= HOT_WORK_MAX_LEL:
+        verdict = f"AT OR ABOVE the {HOT_WORK_MAX_LEL:.1f} %LEL hot-work limit"
+    else:
+        headroom = HOT_WORK_MAX_LEL - gas
+        verdict = (f"BELOW the {HOT_WORK_MAX_LEL:.1f} %LEL hot-work limit, "
+                   f"with {headroom:.2f} %LEL of headroom")
+
     lines = [
-        f"Zone: {state.get('zone', 'unknown')}",
-        f"Equipment: {state.get('machine_id', 'n/a')}",
-        f"Combustible gas: {state.get('gas_lel', 0):.2f} %LEL, "
-        f"trend {state.get('gas_trend', 0):+.2f} %LEL/min",
+        f"Zone: {state.get('zone', 'unknown')} "
+        f"(identifier {state.get('machine_id', 'n/a')})",
+        "Combustible gas is measured as a percentage OF the lower explosive "
+        "limit, so 100 %LEL would be the explosive limit itself.",
+        f"Combustible gas: {gas:.2f} %LEL -- {verdict}. "
+        f"Trend {trend:+.2f} %LEL/min "
+        f"({'rising' if trend > 0 else 'falling' if trend < 0 else 'steady'}).",
         f"Compound risk (model): {state.get('risk', 0):.0%}",
         f"Predicted time to threshold: "
         f"{f'~{lead} min' if lead else 'no crossing predicted'}",
@@ -64,7 +91,10 @@ def _telemetry_block(state: dict[str, Any]) -> str:
         f"Maintenance active: {bool(state.get('maintenance_active'))}",
         f"Shift changeover: {bool(state.get('in_changeover'))}",
         f"Night shift: {bool(state.get('night_shift'))}",
-        f"Area classification: {state.get('area_class', 'SAFE')}",
+        # Named as a classification, not a location. This is an electrical area
+        # class under the hazardous-area standard, not somewhere to evacuate to.
+        f"Electrical area classification (not a location): "
+        f"{state.get('area_class', 'SAFE')}",
         f"Model risk drivers (SHAP): {state.get('explanation') or 'n/a'}",
         f"Permit verdict from deterministic interlocks: {permit}",
     ]
@@ -178,26 +208,39 @@ def _fmt_args(args: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------- reflection agent
 _REFLECTION_SYSTEM = """You are the same containment agent, now reviewing your own plan.
 
-The safety gate refused some of your proposed actions. Read the refusals and
-decide what to do instead. You may not appeal a refusal or restate the refused
-action -- the gate is authoritative.
+The safety gate refused some of your proposed actions. The gate is authoritative
+and its refusals are final.
 
 Answer with:
-- `accepted`: true if the refusals were correct and you accept them
-- `correction`: what you now recommend instead, in two sentences, using only
-  actions that were executed or that a human must perform
-- `residual_risk`: what remains unaddressed after the executed actions
+- `disputes_refusal`: almost always false. Set it true ONLY if a refusal reason
+  states something factually wrong about the readings you were given.
+- `correction`: what a human supervisor should do now, in two sentences. This must
+  NOT restate, rephrase or route around a refused action. If a permit revocation
+  was refused, do not recommend stopping, suspending or shutting down the work it
+  covers -- recommend what to monitor and who to escalate to instead.
+- `residual_risk`: what remains unaddressed after the executed actions.
 
-Be specific to the readings. Do not name regulations."""
+Rules:
+- Use only the readings given. Do not describe gas as elevated, high or above a
+  limit unless the telemetry above says it is above the limit.
+- Refer to the zone only by the name given. Never invent or infer a location.
+- Do not name regulations."""
 
+# `disputes_refusal` rather than `accepted`, and phrased so the common case is the
+# default. Asked to set `accepted: true` when it agreed with the gate, the model
+# returned false while its own `correction` text read "the safety gate correctly
+# identified..." -- the boolean contradicted the prose beside it. Inverting the
+# polarity asks it to flag an exception instead of confirming a norm, and the
+# console renders the flag only when raised rather than labelling every run from a
+# field a 4B model fills inconsistently.
 _REFLECTION_SCHEMA = {
     "type": "object",
     "properties": {
-        "accepted": {"type": "boolean"},
+        "disputes_refusal": {"type": "boolean"},
         "correction": {"type": "string"},
         "residual_risk": {"type": "string"},
     },
-    "required": ["accepted", "correction", "residual_risk"],
+    "required": ["disputes_refusal", "correction", "residual_risk"],
 }
 
 
@@ -237,11 +280,14 @@ def gemma_reflection(state: dict[str, Any]) -> dict:
                               f"actions and refusals above stand as recorded.")}
 
     p = result.payload
+    disputed = bool(p.get("disputes_refusal"))
     msg = (
         f"Reviewed {len(refused)} refused proposal(s) against the executed plan.\n"
         f"  * model: {result.model} ({result.latency_ms} ms, local)\n"
-        f"  * accepted the gate's refusals: {p.get('accepted')}\n"
-        f"  * revised recommendation: {str(p.get('correction', '')).strip()}\n"
+        + (f"  * DISPUTES a refusal as factually wrong -- the refusal still "
+           f"stands; the gate is authoritative\n" if disputed else
+           f"  * accepted the gate's refusals\n")
+        + f"  * revised recommendation: {str(p.get('correction', '')).strip()}\n"
         f"  * residual risk: {str(p.get('residual_risk', '')).strip()}"
     )
     return {

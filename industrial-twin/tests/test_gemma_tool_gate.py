@@ -7,7 +7,7 @@ whole reason `authorise` exists.
 """
 from __future__ import annotations
 
-from sentinel.agents.gemma_nodes import gemma_containment
+from sentinel.agents.gemma_nodes import _telemetry_block, gemma_containment
 from sentinel.agents.tools import REGISTRY, execute_plan, proposal_schema, tool_catalogue
 
 
@@ -172,6 +172,55 @@ def test_catalogue_advertises_real_signatures():
         assert name in cat
         for arg in spec.args:
             assert arg in cat
+
+
+# ------------------------------------------------------ prompt construction
+def _block(**over):
+    base = {"zone": "Blast Furnace 2", "machine_id": "BLF-2", "gas_lel": 1.78,
+            "gas_trend": -0.1, "risk": 0.81, "area_class": "ZONE_1"}
+    return _telemetry_block({**base, **over})
+
+
+def test_gas_reading_states_the_comparison_to_the_limit():
+    """Regression: the model read "1.78 %LEL" as being at the explosive limit.
+
+    %LEL is a percentage *of* the lower explosive limit, and against a 5.0 limit
+    real runs described 1.78 as "above the LEL threshold" and warned of imminent
+    explosion. The prompt now makes the comparison instead of leaving it to the
+    model's arithmetic.
+    """
+    from sentinel.rules.engine import HOT_WORK_MAX_LEL
+
+    below = _block(gas_lel=1.78)
+    assert "BELOW" in below
+    assert f"{HOT_WORK_MAX_LEL:.1f} %LEL hot-work limit" in below
+    assert "headroom" in below
+    assert "percentage OF the lower explosive limit" in below
+
+    above = _block(gas_lel=10.15)
+    assert "AT OR ABOVE" in above
+    assert "BELOW" not in above
+
+
+def test_gas_at_the_limit_reads_as_above_not_below():
+    """The boundary belongs on the restrictive side."""
+    from sentinel.rules.engine import HOT_WORK_MAX_LEL
+
+    assert "AT OR ABOVE" in _block(gas_lel=HOT_WORK_MAX_LEL)
+
+
+def test_area_class_is_labelled_as_a_classification_not_a_place():
+    """Regression: the model evacuated "Zone 1", reading the electrical area
+    class as a location. The zone it should name is the one in `zone`."""
+    b = _block(area_class="ZONE_1")
+    assert "not a location" in b
+    assert "Blast Furnace 2" in b
+
+
+def test_trend_direction_is_stated_in_words():
+    assert "(falling)" in _block(gas_trend=-0.4)
+    assert "(rising)" in _block(gas_trend=0.4)
+    assert "(steady)" in _block(gas_trend=0.0)
 
 
 # ------------------------------------------------------------- node wiring

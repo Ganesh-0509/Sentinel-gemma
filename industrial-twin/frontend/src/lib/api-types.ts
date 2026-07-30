@@ -293,7 +293,13 @@ export interface GemmaBriefing {
 
 /** The agent's review of its own refused proposals. */
 export interface GemmaReflection {
-  accepted: boolean;
+  /**
+   * The model believes a refusal reason misstates the readings. Rendered only
+   * when true: asked to confirm agreement instead, it returned the wrong boolean
+   * beside prose that agreed with the gate, so the field flags an exception
+   * rather than labelling every run. The refusal stands either way.
+   */
+  disputes_refusal: boolean;
   correction: string;
   residual_risk: string;
 }

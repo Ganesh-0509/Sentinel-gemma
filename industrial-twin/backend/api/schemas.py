@@ -329,7 +329,10 @@ class GemmaBriefing(BaseModel):
 
 class GemmaReflection(BaseModel):
     """The agent's review of its own refused proposals."""
-    accepted: bool = False
+    disputes_refusal: bool = Field(
+        default=False,
+        description="The model believes a refusal reason misstates the readings. "
+                    "The refusal stands regardless; the gate is authoritative.")
     correction: str = ""
     residual_risk: str = ""
 

@@ -169,9 +169,14 @@ export function GemmaReasoningPanel({ run }: { run: WorkflowResponse }) {
             <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
               <BrainCircuit className="h-3.5 w-3.5" />
               Self-correction
-              <Chip tone={refl.accepted ? "success" : "warn"}>
-                {refl.accepted ? "refusals accepted" : "disputed"}
-              </Chip>
+              {/* Only shown when raised. A verdict chip on every run came from a
+                  boolean the model filled inconsistently — it once read
+                  "disputed" beside prose agreeing with the gate. */}
+              {refl.disputes_refusal && (
+                <Chip tone="warn" className="normal-case">
+                  disputes a refusal — refusal stands
+                </Chip>
+              )}
             </div>
             {refl.correction && <p className="mb-1.5">{refl.correction}</p>}
             {refl.residual_risk && (
