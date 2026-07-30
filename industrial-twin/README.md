@@ -29,6 +29,7 @@ those signals into a single forward-looking, explainable risk forecast.
 - [Results](#results)
 - [Quick start](#quick-start)
 - [Architecture](#architecture)
+- [The Gemma agent layer](#the-gemma-agent-layer)
 - [How risk is computed](#how-risk-is-computed)
 - [Two properties we guarantee](#two-properties-we-guarantee)
 - [API](#api)
@@ -80,9 +81,21 @@ evaluation rests on.
 
 ## Quick start
 
-**Requirements:** Python ≥ 3.11, [Bun](https://bun.sh) ≥ 1.3
+**Requirements:** Python ≥ 3.11, [Bun](https://bun.sh) ≥ 1.3,
+[Ollama](https://ollama.com) with Gemma 3
 
-### 1. Backend
+### 1. Gemma
+
+The agent layer and all prose run on a local Gemma 3. Everything else works
+without it — every Gemma node records its own absence and the interlocks still
+enforce — but the agent panels will be empty.
+
+```bash
+ollama pull gemma3          # 3.3 GB
+ollama list                 # expect gemma3:latest
+```
+
+### 2. Backend
 
 ```bash
 python -m pip install -e .        # installs the sentinel package + dependencies
@@ -100,10 +113,11 @@ python -m uvicorn sentinel.api.app:app --port 8000
 
 - Interactive API contract: <http://127.0.0.1:8000/docs>
 - Readiness: <http://127.0.0.1:8000/api/v1/health>
+- Agent model: <http://127.0.0.1:8000/api/v1/gemma/status>
 
 `/health` never returns 503. It reports `degraded` and names what is missing.
 
-### 2. Console
+### 3. Console
 
 ```bash
 cd frontend
@@ -114,10 +128,10 @@ bun run dev
 
 <http://localhost:8080>
 
-### 3. Verify
+### 4. Verify
 
 ```bash
-python -m pytest tests -q          # 54 tests
+python -m pytest tests -q          # 217 tests
 ```
 
 ---
@@ -154,9 +168,95 @@ python -m pytest tests -q          # 54 tests
         ▼                ▼                ▼                  ▼
    SHAP             Multi-agent       RAG compliance     3D digital twin
    explanation      workflow          (FAISS-free        (live zone risk
-   (why this        (LangGraph)       TF-IDF + LLM)      on plant model)
-    score)
+   (why this        (LangGraph +      TF-IDF + Gemma)    on plant model)
+    score)          local Gemma)
 ```
+
+---
+
+## The Gemma agent layer
+
+Agent reasoning runs on **Gemma 3** (`gemma3:latest`, 4B) through Ollama, on the
+same machine as the API. Nothing is sent to a cloud model: prose generation now
+prefers the same local Gemma, and reaching a hosted model takes an explicit
+`SENTINEL_LLM_PREFER=gemini`.
+
+```
+risk_monitor ──┬── below threshold ──▶ monitor_only ──▶ END
+               │
+               └─▶ permit_intelligence ──▶ compliance
+                                              │
+                   ┌──────────────────────────┴──────────────┐
+                   ▼                                         ▼
+            gemma_containment                            advisory
+                   │                                         │
+            gemma_reflection                            gemma_advisor ──▶ END
+                   │
+            emergency_orchestrator ──▶ END
+```
+
+`risk_monitor` and `permit_intelligence` are still LLM-free. The permit verdict
+is reached by the rule engine before any Gemma node runs, and the Gemma layer
+widens what the system can autonomously *do* without widening what it is allowed
+to *decide*.
+
+### Why proposals, not function calls
+
+Gemma 3 has no tool-calling template in Ollama — posting `tools` to `/api/chat`
+returns `"gemma3:latest does not support tools"`. So agents propose containment
+actions as JSON constrained by Ollama's `format` parameter, and
+`backend/agents/tools.py` decides what executes.
+
+That constraint landed somewhere better than native function calling would have.
+On a system that can stop work in a live plant, the useful question is not *can
+the model call a function* but *who is accountable when it calls the wrong one*:
+
+```
+Gemma proposes ─▶ coerce arguments ─▶ authorise against the
+                                      deterministic verdict ─▶ execute or refuse
+```
+
+`format` constrains shape and knows nothing about meaning, and the model
+demonstrably exploits the gap. Measured output for a Zone-4 hot-work scenario —
+all valid JSON, all wrong:
+
+| What it returned | What the gate does |
+|---|---|
+| `rate: "Maximum"`, `direction: "Upward"` | Coerced to `target_cfm`, clamped to fan range |
+| `severity: "Critical"` | Mapped to `LEVEL_3`; unspecified levels fail *upward* |
+| `permit_id: "HOT-WORK-4-23"` | Discarded — nothing upstream issues permit numbers |
+| `muster_point: "Docking Bay Alpha"` | Discarded — no such location exists |
+| `trigger_zone_alarm` three times | Duplicates collapsed |
+| Cited HAZWOPER | Not in the corpus; standards come from RAG, not the model |
+
+Restrictive actions additionally require the deterministic layer to have
+escalated, and `veto_permit` requires an interlock rejection — a permit is
+revoked by the rule engine, never by a language model. Ventilation is exempt,
+because purging removes the hazard rather than restricting people.
+
+The model's self-reported confidence is displayed but never gated on. It returned
+0.95 on a zone the rule engine had cleared, which is not evidence of anything.
+
+Refusals are returned as receipts alongside executions and rendered in the
+console. A withheld action is the visible evidence that the gate works, and an
+operator reviewing an incident needs to know what the agent wanted to do.
+
+### Latency
+
+Generation is the whole cost. Measured on a CPU-bound box: **10.7 tok/s**
+generation against ~84 tok/s prompt eval. Long prompts are nearly free, long
+answers are not — so the schemas are tight, output caps are low, and there are
+three Gemma nodes rather than five. With the model resident in VRAM this drops by
+roughly an order of magnitude.
+
+`GET /api/v1/gemma/status` reports model identity and reachability from Ollama's
+tag list without spending a generation. Per-node latency is returned with every
+workflow run, and reports model load separately from generation time: Ollama
+evicts an idle model and charges the reload to whichever node runs next, which
+made one 43-token answer measure 0.7 tok/s against ~10 tok/s warm.
+
+If Gemma is unreachable, every node records its own absence and the graph still
+completes. The forecaster, the rule engine and the interlocks do not depend on it.
 
 **Why the layers are separated.** Hazard, consequence and urgency are distinct
 questions. `risk` answers *"how likely is an incident?"* and nothing else.
@@ -341,12 +441,19 @@ All optional; every value has a working default.
 | Variable | Default | Purpose |
 |---|---|---|
 | `SENTINEL_CORS_ORIGINS` | localhost 5173/8080/3000 | Comma-separated allowed origins |
-| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | — | Enables the Gemini tier |
+| `GEMMA_MODEL` | `gemma3:latest` | Model behind the agent layer and prose |
+| `GEMMA_NUM_CTX` | `8192` | Context window. The Ollama default of 4096 truncates from the front, dropping the system instruction first |
+| `GEMMA_TEMPERATURE` | `0.1` | Agent decisions should be defensible in an incident review |
+| `OLLAMA_URL` | `http://localhost:11434` | Where Gemma runs |
+| `SENTINEL_LLM_PREFER` | unset (local) | Set to `gemini` to move *prose* to the cloud tier. Requires `GEMINI_API_KEY`. Agent reasoning stays local either way |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | — | Only read when the cloud tier is explicitly preferred |
 | `GEMINI_MODEL` | `gemini-2.0-flash` | |
-| `OLLAMA_URL` | `http://localhost:11434` | Local fallback tier |
-| `OLLAMA_MODEL` | `llama3.1:8b` | |
 | `SENTINEL_EMBED` | unset (TF-IDF) | Set to `ollama` for embedding retrieval |
 | `VITE_API_URL` *(console)* | `http://127.0.0.1:8000` | Backend base URL |
+
+The cloud tier requires an explicit opt-in rather than just a key in the
+environment. A stray `GEMINI_API_KEY` should not be able to move inference
+off-site during a demo that is meant to be running locally.
 
 Model constants — gas thresholds, horizons, feature window, seed — live in
 `backend/config.py`. They are configuration, not model output; changing them is a

@@ -134,7 +134,13 @@ def gemma_containment(state: dict[str, Any]) -> dict:
     proposal = result.payload
     receipts = execute_plan(
         proposal,
-        zone_id=state.get("zone") or state.get("machine_id") or "unknown",
+        # `machine_id`, not `zone`. The workflow is handed the display name in
+        # `zone` ("Blast Furnace 2") and the identifier in `machine_id` ("BLF-2"),
+        # and a tool argument wants the identifier. Taking `zone` first meant the
+        # gate overwrote a correctly-proposed "BLF-2" with the human label -- the
+        # substitution meant to protect against a wrong zone was itself writing a
+        # value no downstream system could resolve.
+        zone_id=state.get("machine_id") or state.get("zone") or "unknown",
         permit_id=(state.get("permit_decision") or {}).get("permit_id"),
         escalated=escalated,
         permit_rejected=permit_rejected,

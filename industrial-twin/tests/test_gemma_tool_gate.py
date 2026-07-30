@@ -7,6 +7,7 @@ whole reason `authorise` exists.
 """
 from __future__ import annotations
 
+from sentinel.agents.gemma_nodes import gemma_containment
 from sentinel.agents.tools import REGISTRY, execute_plan, proposal_schema, tool_catalogue
 
 
@@ -171,3 +172,55 @@ def test_catalogue_advertises_real_signatures():
         assert name in cat
         for arg in spec.args:
             assert arg in cat
+
+
+# ------------------------------------------------------------- node wiring
+def test_containment_node_uses_the_zone_identifier_not_its_label(monkeypatch):
+    """Regression: the gate substituted the display name for the identifier.
+
+    The workflow carries the label in `zone` ("Blast Furnace 2") and the id in
+    `machine_id` ("BLF-2"). Reading `zone` first meant a correctly proposed
+    "BLF-2" was overwritten with a value no downstream system resolves — the
+    substitution built to prevent a wrong-zone action was causing one.
+    """
+    class _Result:
+        payload = {"reasoning": "x", "confidence": 0.5, "tool_calls": [
+            {"name": "adjust_ventilation",
+             "arguments": {"zone_id": "BLF-2", "target_cfm": 5000}},
+        ]}
+        model, latency_ms, eval_count, tokens_per_s = "gemma3:latest", 10, 5, 1.0
+
+        def as_meta(self):
+            return {"model": self.model, "latency_ms": self.latency_ms,
+                    "load_ms": 0, "gen_ms": 10, "eval_count": self.eval_count,
+                    "prompt_count": 1, "tokens_per_s": self.tokens_per_s,
+                    "truncated": False, "runtime": "ollama (local)"}
+
+    class _Client:
+        def structured(self, **_):
+            return _Result()
+
+    monkeypatch.setattr("sentinel.agents.gemma_nodes.get_gemma", lambda: _Client())
+
+    out = gemma_containment({
+        "zone": "Blast Furnace 2", "machine_id": "BLF-2",
+        "escalate": True, "permit_decision": {"status": "REJECTED"},
+        "risk": 0.9, "gas_lel": 12.0, "trace": [],
+    })
+    assert out["tool_executions"][0]["arguments"]["zone_id"] == "BLF-2"
+
+
+def test_containment_node_records_absence_when_gemma_is_down(monkeypatch):
+    """An unreachable model must not break the graph, and must say it was absent."""
+    from sentinel.llm.gemma import GemmaUnavailable
+
+    class _Down:
+        def structured(self, **_):
+            raise GemmaUnavailable("gemma unreachable: connection refused")
+
+    monkeypatch.setattr("sentinel.agents.gemma_nodes.get_gemma", lambda: _Down())
+
+    out = gemma_containment({"zone": "Blast Furnace 2", "machine_id": "BLF-2",
+                             "escalate": True, "trace": []})
+    assert "tool_executions" not in out          # nothing invented
+    assert any("did not run" in line for line in out["trace"])
