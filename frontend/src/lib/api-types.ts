@@ -304,6 +304,96 @@ export interface GemmaReflection {
   residual_risk: string;
 }
 
+/**
+ * One monitored zone as the orchestrator sees it.
+ *
+ * Called a sensor agent because that is its role in the chain — it is the thing
+ * that raises a hand. The detection is deterministic (rule engine plus the
+ * compound-risk model), not a language model, which is why it can be trusted to
+ * decide whether the expensive Gemma agents run at all.
+ */
+export interface SensorAgent {
+  zone_id: string;
+  zone_name: string;
+  risk: number;
+  gas_lel: number;
+  gas_trend: number;
+  workers_in_zone: number;
+  hot_work_active: boolean;
+  maintenance_active: boolean;
+  state: "alerting" | "elevated" | "nominal";
+  analysed_at_minute: number | null;
+}
+
+export type ChainLayer = "sensor" | "retrieval" | "gemma" | "response";
+
+export interface ChainNode {
+  node: string;
+  layer: ChainLayer;
+  label: string;
+  detail: string;
+}
+
+export interface ChainNodeState extends ChainNode {
+  state: "pending" | "running" | "done";
+  ms: number;
+}
+
+export interface OrchestratorRun {
+  zone_id: string;
+  zone_name: string;
+  minute: number;
+  risk: number;
+  /** Why this zone was picked, in plant terms rather than model terms. */
+  trigger: string;
+  active_node: string | null;
+  elapsed_ms: number;
+  running: boolean;
+  error: string | null;
+  nodes: ChainNodeState[];
+  /** Attached only once the run completes — a partial graph state is not a result. */
+  result: WorkflowResponse | null;
+}
+
+export interface OrchestratorHistoryItem {
+  zone_id: string;
+  zone_name: string;
+  minute: number;
+  risk: number;
+  elapsed_ms: number;
+  verdict: PermitStatus | null;
+  priority: Priority | null;
+  executed: number;
+  refused: number;
+  error: string | null;
+}
+
+export interface OrchestratorState {
+  enabled: boolean;
+  busy: boolean;
+  minute: number;
+  cycles: number;
+  dispatched: number;
+  /**
+   * Why nothing is being analysed. A quiet plant is a real outcome, and naming it
+   * stops an idle console from reading as a broken one.
+   */
+  idle_reason: string | null;
+  dispatch_threshold: number;
+  sensors: SensorAgent[];
+  /** The chain executing right now. Carries no result until it finishes. */
+  current: OrchestratorRun | null;
+  /**
+   * The most recent finished chain, with its result. Separate from `current` so
+   * the outcome panels do not blank out the instant the next dispatch begins — a
+   * chain takes minutes, and an operator needs the last conclusion to stay
+   * readable while the system works on the next zone.
+   */
+  last_completed: OrchestratorRun | null;
+  history: OrchestratorHistoryItem[];
+  chain: ChainNode[];
+}
+
 export interface GemmaStatus {
   model: string;
   runtime: string;

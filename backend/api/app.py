@@ -97,18 +97,83 @@ async def _run_clock(interval: float) -> None:
         plant.clock_running = False
 
 
+def _orchestrator_interval() -> float:
+    """Seconds between orchestrator scans.
+
+    A scan is cheap -- it reads zone state the clock has already computed. The
+    expensive part is a dispatch, and that is rate-limited by the risk threshold
+    and the re-run deadband in `supervisor`, not by this interval. Five seconds
+    keeps the console feeling live without the loop being the thing that decides
+    how often Gemma runs.
+    """
+    raw = os.environ.get("SENTINEL_ORCHESTRATOR_SECONDS")
+    try:
+        return max(1.0, float(raw)) if raw else 5.0
+    except ValueError:
+        log.warning("ignoring invalid SENTINEL_ORCHESTRATOR_SECONDS=%r", raw)
+        return 5.0
+
+
+async def _run_orchestrator(interval: float) -> None:
+    """Watch every zone and dispatch the agent chain without being asked.
+
+    This is what makes the console autonomous rather than a query tool: no
+    operator picks a zone, and no page load triggers analysis. The loop notices
+    which zone is deteriorating and starts work on it.
+
+    Only one run is in flight at a time. A full emergency chain measured 190s with
+    Gemma on CPU, and running several concurrently would put every one of them
+    behind the same busy model while making the console look like it is doing more
+    than it is.
+    """
+    from sentinel.agents.supervisor import ORCHESTRATOR
+
+    while True:
+        await asyncio.sleep(interval)
+        if not plant.ready or not ORCHESTRATOR.enabled:
+            continue
+        try:
+            ORCHESTRATOR.cycles += 1
+            if ORCHESTRATOR.busy:
+                continue
+            zones = plant.zone_states()
+            target = ORCHESTRATOR.pick_target(zones, plant.minute)
+            if target is None:
+                continue
+            log.info("orchestrator dispatching %s at %.0f%% risk",
+                     target["zone_id"], target["risk"] * 100)
+            # The graph is synchronous and CPU/model-bound; `dispatch` puts it on
+            # a worker thread so the event loop keeps serving the console the
+            # progress snapshot while the chain runs.
+            ORCHESTRATOR.dispatch(
+                target, plant.minute,
+                runner=lambda zid, _run: _execute_workflow(zid))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A monitoring outage, not a plant outage: interlocks and the alert
+            # queue are unaffected, so log and keep watching.
+            log.exception("orchestrator cycle failed; loop continues")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     plant.startup()
     interval = _clock_interval()
     task = asyncio.create_task(_run_clock(interval), name="sentinel-plant-clock")
     log.info("plant clock started: 1 plant minute per %.2fs wall clock", interval)
+    orch_interval = _orchestrator_interval()
+    orch = asyncio.create_task(_run_orchestrator(orch_interval),
+                              name="sentinel-orchestrator")
+    log.info("autonomous orchestrator started: scanning every %.1fs", orch_interval)
     try:
         yield
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for t in (task, orch):
+            t.cancel()
+        for t in (task, orch):
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
 
 
 app = FastAPI(
@@ -196,6 +261,58 @@ def gemma_status() -> S.GemmaStatus:
         prose_backend=get_llm().backend,
         prose_detail=get_llm().detail,
     )
+
+
+@api.get("/orchestrator/state", response_model=S.OrchestratorState, tags=["workflow"])
+def orchestrator_state() -> S.OrchestratorState:
+    """One frame of the autonomous orchestrator: what it sees and what it is doing.
+
+    Deliberately a single read. The console polls this a few times a second to
+    animate the chain, and splitting it across endpoints would let the sensor row
+    and the node states come from different instants -- so the diagram would show
+    a node running for a zone the sensor row had already stopped flagging.
+    """
+    from sentinel.agents.supervisor import ORCHESTRATOR
+
+    zones = plant.zone_states() if plant.ready else []
+    snap = ORCHESTRATOR.snapshot(zones, plant.minute)
+
+    # The in-flight run carries no result: a partial graph state is not a workflow
+    # response. The last finished run carries one, and is reported separately so
+    # the outcome panels stay populated while the next chain executes.
+    current = S.OrchestratorRun(**snap["current"]) if snap["current"] else None
+    last = None
+    if snap["last_completed"]:
+        payload = (
+            _workflow_response(snap["last_completed"]["zone_id"], snap["last_result"])
+            if snap["last_result"] is not None else None
+        )
+        last = S.OrchestratorRun(**snap["last_completed"], result=payload)
+
+    return S.OrchestratorState(
+        enabled=snap["enabled"], busy=snap["busy"], minute=snap["minute"],
+        cycles=snap["cycles"], dispatched=snap["dispatched"],
+        idle_reason=snap["idle_reason"],
+        dispatch_threshold=snap["dispatch_threshold"],
+        sensors=[S.SensorAgent(**s) for s in snap["sensors"]],
+        current=current,
+        last_completed=last,
+        history=[S.OrchestratorHistoryItem(**h) for h in snap["history"]],
+        chain=[S.ChainNode(**n) for n in snap["chain"]],
+    )
+
+
+@api.post("/orchestrator/enable", response_model=S.OrchestratorState, tags=["workflow"])
+def orchestrator_enable(on: bool = Query(True)) -> S.OrchestratorState:
+    """Pause or resume autonomous dispatch.
+
+    Pausing stops new dispatches; a run already in flight finishes. Useful when
+    presenting, so the loop does not start a fresh three-minute chain in the
+    middle of an explanation of the last one.
+    """
+    from sentinel.agents.supervisor import ORCHESTRATOR
+    ORCHESTRATOR.enabled = on
+    return orchestrator_state()
 
 
 # -------------------------------------------------------------------- plant
@@ -361,18 +478,18 @@ def ask(body: S.ComplianceQuery) -> S.ComplianceResponse:
 
 
 # ----------------------------------------------------------------- workflow
-@api.post("/workflow/run/{zone_id}", response_model=S.WorkflowResponse, tags=["workflow"])
-def run_workflow(zone_id: str) -> S.WorkflowResponse:
-    """Execute the multi-agent safety workflow against a zone's live state."""
-    _require_ready()
-    try:
-        s = plant.zone_state(zone_id)
-    except KeyError:
-        raise HTTPException(404, f"unknown zone '{zone_id}'")
+def _execute_workflow(zone_id: str) -> dict:
+    """Run the agent chain against a zone's live state and return raw graph output.
 
+    Shared by the workflow endpoint and the autonomous orchestrator so both build
+    the graph's input from the same place. Duplicating this mapping is how the two
+    paths drift: the orchestrator would keep analysing zones on a state the
+    endpoint had already stopped sending.
+    """
+    s = plant.zone_state(zone_id)                 # KeyError propagates to caller
     from sentinel.agents.graph import run_safety_workflow
     drivers = "; ".join(d["label"] for d in s["drivers"][:4]) or "n/a"
-    result = run_safety_workflow({
+    return run_safety_workflow({
         "zone": s["name"], "machine_id": zone_id, "risk": s["risk"],
         # Pass None through as None. Coercing it to 0 made every zone without a
         # horizon prediction report "~0 min to threshold", which reads as "the
@@ -391,6 +508,20 @@ def run_workflow(zone_id: str) -> S.WorkflowResponse:
         "proximate_hazards": plant.proximate_hazards(zone_id),
     })
 
+
+@api.post("/workflow/run/{zone_id}", response_model=S.WorkflowResponse, tags=["workflow"])
+def run_workflow(zone_id: str) -> S.WorkflowResponse:
+    """Execute the multi-agent safety workflow against a zone's live state."""
+    _require_ready()
+    try:
+        result = _execute_workflow(zone_id)
+    except KeyError:
+        raise HTTPException(404, f"unknown zone '{zone_id}'")
+    return _workflow_response(zone_id, result)
+
+
+def _workflow_response(zone_id: str, result: dict) -> S.WorkflowResponse:
+    """Shape raw graph output into the API response."""
     comp = result.get("compliance")
     comp_model = None
     if comp:

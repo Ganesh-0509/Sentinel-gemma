@@ -11,6 +11,7 @@ import type {
   ClockResponse,
   ComplianceResponse,
   GemmaStatus,
+  OrchestratorState,
   HealthResponse,
   PermitDecisionResponse,
   PermitRequestBody,
@@ -85,6 +86,9 @@ export const api = {
   // ---------------------------------------------------------------- system
   health: () => request<HealthResponse>("/health"),
   gemmaStatus: () => request<GemmaStatus>("/gemma/status"),
+  orchestratorState: () => request<OrchestratorState>("/orchestrator/state"),
+  orchestratorEnable: (on: boolean) =>
+    request<OrchestratorState>(`/orchestrator/enable?on=${on}`, { method: "POST" }),
 
   // ----------------------------------------------------------------- plant
   zones: () => request<ZoneState[]>("/zones"),

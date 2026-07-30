@@ -12,6 +12,7 @@ import type {
   AlertLogEntry,
   ClockResponse,
   GemmaStatus,
+  OrchestratorState,
   HealthResponse,
   ProximateHazard,
   ScoreboardResponse,
@@ -37,6 +38,7 @@ export const CLOCK_MS = 1000;
 export const qk = {
   health: ["health"] as const,
   gemma: ["gemma-status"] as const,
+  orchestrator: ["orchestrator"] as const,
   zones: ["zones"] as const,
   zone: (id: string) => ["zone", id] as const,
   zoneHistory: (id: string, w: number) => ["zone-history", id, w] as const,
@@ -74,6 +76,30 @@ export function useGemmaStatus(opts?: Opts<GemmaStatus>) {
     queryFn: api.gemmaStatus,
     refetchInterval: 30000,
     ...opts,
+  });
+}
+
+/**
+ * The autonomous orchestrator, polled fast enough to animate the chain.
+ *
+ * A single endpoint by design: the sensor row and the node states have to come
+ * from the same instant, or the diagram shows a node running for a zone the
+ * sensor row has already stopped flagging.
+ */
+export function useOrchestrator(opts?: Opts<OrchestratorState>) {
+  return useQuery({
+    queryKey: qk.orchestrator,
+    queryFn: api.orchestratorState,
+    refetchInterval: 1200,
+    ...opts,
+  });
+}
+
+export function useOrchestratorEnable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => api.orchestratorEnable(on),
+    onSuccess: (d) => qc.setQueryData(qk.orchestrator, d),
   });
 }
 

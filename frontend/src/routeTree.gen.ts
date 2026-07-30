@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SimulationRouteImport } from './routes/simulation'
 import { Route as RiskAnalyticsRouteImport } from './routes/risk-analytics'
 import { Route as PermitIntelligenceRouteImport } from './routes/permit-intelligence'
+import { Route as OrchestrationRouteImport } from './routes/orchestration'
 import { Route as LiveReplayRouteImport } from './routes/live-replay'
 import { Route as IncidentInvestigationRouteImport } from './routes/incident-investigation'
 import { Route as GeospatialRouteImport } from './routes/geospatial'
@@ -35,6 +36,11 @@ const RiskAnalyticsRoute = RiskAnalyticsRouteImport.update({
 const PermitIntelligenceRoute = PermitIntelligenceRouteImport.update({
   id: '/permit-intelligence',
   path: '/permit-intelligence',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrchestrationRoute = OrchestrationRouteImport.update({
+  id: '/orchestration',
+  path: '/orchestration',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LiveReplayRoute = LiveReplayRouteImport.update({
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/geospatial': typeof GeospatialRoute
   '/incident-investigation': typeof IncidentInvestigationRoute
   '/live-replay': typeof LiveReplayRoute
+  '/orchestration': typeof OrchestrationRoute
   '/permit-intelligence': typeof PermitIntelligenceRoute
   '/risk-analytics': typeof RiskAnalyticsRoute
   '/simulation': typeof SimulationRoute
@@ -107,6 +114,7 @@ export interface FileRoutesByTo {
   '/geospatial': typeof GeospatialRoute
   '/incident-investigation': typeof IncidentInvestigationRoute
   '/live-replay': typeof LiveReplayRoute
+  '/orchestration': typeof OrchestrationRoute
   '/permit-intelligence': typeof PermitIntelligenceRoute
   '/risk-analytics': typeof RiskAnalyticsRoute
   '/simulation': typeof SimulationRoute
@@ -122,6 +130,7 @@ export interface FileRoutesById {
   '/geospatial': typeof GeospatialRoute
   '/incident-investigation': typeof IncidentInvestigationRoute
   '/live-replay': typeof LiveReplayRoute
+  '/orchestration': typeof OrchestrationRoute
   '/permit-intelligence': typeof PermitIntelligenceRoute
   '/risk-analytics': typeof RiskAnalyticsRoute
   '/simulation': typeof SimulationRoute
@@ -138,6 +147,7 @@ export interface FileRouteTypes {
     | '/geospatial'
     | '/incident-investigation'
     | '/live-replay'
+    | '/orchestration'
     | '/permit-intelligence'
     | '/risk-analytics'
     | '/simulation'
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
     | '/geospatial'
     | '/incident-investigation'
     | '/live-replay'
+    | '/orchestration'
     | '/permit-intelligence'
     | '/risk-analytics'
     | '/simulation'
@@ -166,6 +177,7 @@ export interface FileRouteTypes {
     | '/geospatial'
     | '/incident-investigation'
     | '/live-replay'
+    | '/orchestration'
     | '/permit-intelligence'
     | '/risk-analytics'
     | '/simulation'
@@ -181,6 +193,7 @@ export interface RootRouteChildren {
   GeospatialRoute: typeof GeospatialRoute
   IncidentInvestigationRoute: typeof IncidentInvestigationRoute
   LiveReplayRoute: typeof LiveReplayRoute
+  OrchestrationRoute: typeof OrchestrationRoute
   PermitIntelligenceRoute: typeof PermitIntelligenceRoute
   RiskAnalyticsRoute: typeof RiskAnalyticsRoute
   SimulationRoute: typeof SimulationRoute
@@ -207,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/permit-intelligence'
       fullPath: '/permit-intelligence'
       preLoaderRoute: typeof PermitIntelligenceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orchestration': {
+      id: '/orchestration'
+      path: '/orchestration'
+      fullPath: '/orchestration'
+      preLoaderRoute: typeof OrchestrationRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/live-replay': {
@@ -285,6 +305,7 @@ const rootRouteChildren: RootRouteChildren = {
   GeospatialRoute: GeospatialRoute,
   IncidentInvestigationRoute: IncidentInvestigationRoute,
   LiveReplayRoute: LiveReplayRoute,
+  OrchestrationRoute: OrchestrationRoute,
   PermitIntelligenceRoute: PermitIntelligenceRoute,
   RiskAnalyticsRoute: RiskAnalyticsRoute,
   SimulationRoute: SimulationRoute,

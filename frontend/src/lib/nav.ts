@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   Scale,
   Radar,
+  BrainCircuit,
 } from "lucide-react";
 
 export type NavItem = {
@@ -29,6 +30,10 @@ export const primaryNav: NavItem[] = [
   { title: "Live Replay", to: "/live-replay", icon: PlayCircle },
   { title: "Risk Analytics", to: "/risk-analytics", icon: LineChart },
   { title: "Command Center", to: "/command-center", icon: ShieldAlert, status: "critical" },
+  // Autonomous first, manual second. The orchestration page is what the system
+  // does on its own; Agent Workflow is the same chain driven by hand, which is
+  // useful for demonstrating a specific zone but is not how it runs.
+  { title: "AI Orchestration", to: "/orchestration", icon: BrainCircuit, status: "live" },
   { title: "Agent Workflow", to: "/agent-workflow", icon: Workflow },
   { title: "Permit Intelligence", to: "/permit-intelligence", icon: FileCheck2 },
   { title: "Compliance Assistant", to: "/compliance", icon: MessageSquareText },

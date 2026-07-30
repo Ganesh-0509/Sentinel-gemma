@@ -84,7 +84,7 @@ def test_the_plant_sop_is_marked_internal(store):
     sop = [c for c in store.chunks if c.source_file == "sentinel-plant-sop.md"]
     assert sop, "the SOP is missing from the corpus"
     assert all(c.kind == "INTERNAL" for c in sop)
-    assert all(c.standard == "SentinelAI SOP" for c in sop)
+    assert all(c.standard == "Sentinel-Gemma SOP" for c in sop)
 
 
 # --------------------------------------------------------------- retrieval

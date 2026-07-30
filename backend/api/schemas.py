@@ -273,6 +273,94 @@ class ComplianceResponse(BaseModel):
                     "SOP; high = a standard matched confidently.")
 
 
+class SensorAgent(BaseModel):
+    """One monitored zone as the orchestrator sees it.
+
+    Called a sensor agent in the console because that is its role in the chain --
+    it is the thing that raises a hand. The detection itself is deterministic
+    (rule engine plus the compound-risk model), not a language model, which is why
+    it can be trusted to decide *whether* the expensive agents run at all.
+    """
+    zone_id: str
+    zone_name: str
+    risk: float
+    gas_lel: float
+    gas_trend: float
+    workers_in_zone: int
+    hot_work_active: bool
+    maintenance_active: bool
+    state: str = Field(description="alerting | elevated | nominal")
+    analysed_at_minute: int | None = Field(
+        default=None, description="Plant minute this zone was last analysed")
+
+
+class ChainNode(BaseModel):
+    """A node in the chain, and which layer of the diagram it belongs to."""
+    node: str
+    layer: str = Field(description="sensor | retrieval | gemma | response")
+    label: str
+    detail: str
+
+
+class ChainNodeState(ChainNode):
+    state: str = Field(description="pending | running | done")
+    ms: int = 0
+
+
+class OrchestratorRun(BaseModel):
+    """The run currently in flight, or the one that just finished."""
+    zone_id: str
+    zone_name: str
+    minute: int
+    risk: float
+    trigger: str = Field(description="Why this zone was picked, in plant terms")
+    active_node: str | None = None
+    elapsed_ms: int = 0
+    running: bool = True
+    error: str | None = None
+    nodes: list[ChainNodeState] = Field(default_factory=list)
+    result: WorkflowResponse | None = Field(
+        default=None, description="Attached once the run completes")
+
+
+class OrchestratorHistoryItem(BaseModel):
+    zone_id: str
+    zone_name: str
+    minute: int
+    risk: float
+    elapsed_ms: int
+    verdict: PermitStatus | None = None
+    priority: Priority | None = None
+    executed: int = 0
+    refused: int = 0
+    error: str | None = None
+
+
+class OrchestratorState(BaseModel):
+    """One frame of the autonomous orchestrator, for the console to render."""
+    enabled: bool
+    busy: bool
+    minute: int
+    cycles: int = Field(description="Scan cycles since startup")
+    dispatched: int = Field(description="Agent chains dispatched since startup")
+    idle_reason: str | None = Field(
+        default=None,
+        description="Why nothing is being analysed right now. A quiet plant is a "
+                    "real outcome, and naming it stops an idle console reading "
+                    "as a broken one.")
+    dispatch_threshold: float
+    sensors: list[SensorAgent] = Field(default_factory=list)
+    current: OrchestratorRun | None = Field(
+        default=None, description="The chain executing right now, without a result")
+    last_completed: OrchestratorRun | None = Field(
+        default=None,
+        description="The most recent finished chain, with its result attached. "
+                    "Reported separately from `current` so the outcome stays on "
+                    "screen while the next chain runs.")
+    history: list[OrchestratorHistoryItem] = Field(default_factory=list)
+    chain: list[ChainNode] = Field(default_factory=list)
+
+
 class GemmaStatus(BaseModel):
     """Identity of the model behind the agent layer, for the console badge."""
     model: str

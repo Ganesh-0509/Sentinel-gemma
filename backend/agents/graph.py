@@ -424,17 +424,26 @@ def build_safety_graph():
         gemma_containment,
         gemma_reflection,
     )
+    from sentinel.agents.supervisor import ORCHESTRATOR
+
+    # Each node is wrapped so it reports its own start and finish to whichever
+    # orchestrator run is in flight. A Gemma node can occupy a minute on its own,
+    # so without per-node progress the console has nothing to show between
+    # dispatch and completion but a spinner. The wrapper is a no-op when the graph
+    # is invoked directly -- by the workflow endpoint, or by a test.
+    inst = ORCHESTRATOR.instrument
 
     g = StateGraph(SafetyState)
-    g.add_node("risk_monitor", risk_monitor)
-    g.add_node("permit_intelligence", permit_intelligence)
-    g.add_node("compliance", compliance)
-    g.add_node("gemma_containment", gemma_containment)
-    g.add_node("gemma_reflection", gemma_reflection)
-    g.add_node("emergency_orchestrator", emergency_orchestrator)
-    g.add_node("advisory", advisory)
-    g.add_node("gemma_advisor", gemma_advisor)
-    g.add_node("monitor_only", monitor_only)
+    g.add_node("risk_monitor", inst("risk_monitor", risk_monitor))
+    g.add_node("permit_intelligence", inst("permit_intelligence", permit_intelligence))
+    g.add_node("compliance", inst("compliance", compliance))
+    g.add_node("gemma_containment", inst("gemma_containment", gemma_containment))
+    g.add_node("gemma_reflection", inst("gemma_reflection", gemma_reflection))
+    g.add_node("emergency_orchestrator",
+               inst("emergency_orchestrator", emergency_orchestrator))
+    g.add_node("advisory", inst("advisory", advisory))
+    g.add_node("gemma_advisor", inst("gemma_advisor", gemma_advisor))
+    g.add_node("monitor_only", inst("monitor_only", monitor_only))
 
     g.set_entry_point("risk_monitor")
     g.add_conditional_edges("risk_monitor", route_after_risk,
