@@ -11,6 +11,7 @@ import type {
   AlertItem,
   AlertLogEntry,
   ClockResponse,
+  GemmaStatus,
   HealthResponse,
   ProximateHazard,
   ScoreboardResponse,
@@ -35,6 +36,7 @@ export const CLOCK_MS = 1000;
 
 export const qk = {
   health: ["health"] as const,
+  gemma: ["gemma-status"] as const,
   zones: ["zones"] as const,
   zone: (id: string) => ["zone", id] as const,
   zoneHistory: (id: string, w: number) => ["zone-history", id, w] as const,
@@ -55,6 +57,22 @@ export function useHealth(opts?: Opts<HealthResponse>) {
     queryKey: qk.health,
     queryFn: api.health,
     refetchInterval: 15000,
+    ...opts,
+  });
+}
+
+/**
+ * Which Gemma model the agent layer is using, and whether it is reachable.
+ *
+ * Resolved from Ollama's tag list server-side, so this costs no generation. It
+ * polls slowly: the answer only changes if someone stops Ollama or pulls a
+ * different tag mid-shift.
+ */
+export function useGemmaStatus(opts?: Opts<GemmaStatus>) {
+  return useQuery({
+    queryKey: qk.gemma,
+    queryFn: api.gemmaStatus,
+    refetchInterval: 30000,
     ...opts,
   });
 }

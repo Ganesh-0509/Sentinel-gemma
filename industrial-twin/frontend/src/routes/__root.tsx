@@ -6,10 +6,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "@/components/layout/app-shell";
 
 function NotFoundComponent() {
@@ -33,9 +32,9 @@ function NotFoundComponent() {
 
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
+  // Boundary-caught errors are recovered server-side by lib/error-capture.ts,
+  // which server.ts reads to rebuild a stack h3 would otherwise flatten into a
+  // generic 500. No external error service is contacted.
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">

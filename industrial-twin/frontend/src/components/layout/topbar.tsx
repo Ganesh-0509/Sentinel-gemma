@@ -1,5 +1,13 @@
-import { AlertTriangle, RotateCw } from "lucide-react";
-import { asShiftTime, riskPct, useAlerts, useClock, useHealth, useZones } from "@/lib/queries";
+import { AlertTriangle, Cpu, RotateCw } from "lucide-react";
+import {
+  asShiftTime,
+  riskPct,
+  useAlerts,
+  useClock,
+  useGemmaStatus,
+  useHealth,
+  useZones,
+} from "@/lib/queries";
 
 /**
  * The console header.
@@ -15,6 +23,7 @@ export function TopBar() {
   const health = useHealth();
   const zones = useZones();
   const alerts = useAlerts();
+  const gemma = useGemmaStatus();
 
   const running = clock.data?.running ?? false;
   const minute = clock.data?.minute ?? 0;
@@ -108,10 +117,46 @@ export function TopBar() {
           )}
         </div>
 
-        {health.data && (
-          <div className="flex items-center gap-1.5" title="Language-model backend in use">
-            <span className="uppercase tracking-wider">LLM</span>
-            <span className="mono text-foreground">{health.data.llm_backend}</span>
+        {/*
+          The model behind the agent layer, named explicitly rather than as a
+          generic "LLM" badge. Two things an operator (and a reviewer) should be
+          able to read off the header without opening a panel: which model is
+          reasoning, and whether it is running on this machine. "local" here is
+          load-bearing — plant telemetry never leaves the site, and the console
+          keeps working with the network unplugged.
+        */}
+        {gemma.data && (
+          <div
+            className={`flex items-center gap-1.5 rounded-md border px-2 py-1 ${
+              gemma.data.available
+                ? "border-border bg-background/50"
+                : "border-warning/40 bg-warning/10"
+            }`}
+            title={
+              gemma.data.available
+                ? `Agent reasoning runs on ${gemma.data.model} via ${gemma.data.runtime}. ` +
+                  `Prose: ${gemma.data.prose_detail || gemma.data.prose_backend}. ` +
+                  `${gemma.data.tools.length} containment tools registered.`
+                : `${gemma.data.model} is not reachable. The deterministic ` +
+                  `interlocks still enforce; the agent layer is absent.`
+            }
+          >
+            <Cpu
+              className={`h-3.5 w-3.5 ${
+                gemma.data.available ? "text-success" : "text-warning"
+              }`}
+            />
+            <div className="leading-tight">
+              <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                Agent model
+              </div>
+              <div className="mono text-[11px] font-semibold text-foreground">
+                {gemma.data.model}
+                <span className="ml-1 font-normal text-muted-foreground">
+                  {gemma.data.available ? "· local" : "· offline"}
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </div>

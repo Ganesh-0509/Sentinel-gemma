@@ -1,5 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Panel, Chip } from "@/components/panel";
+import {
+  GemmaReasoningPanel,
+  GemmaTelemetryStrip,
+  OperatorBriefingPanel,
+  ToolExecutionStream,
+} from "@/components/gemma/gemma-panels";
 import { ErrorState, Loading, QueryBoundary } from "@/components/data-state";
 import { priorityTone, riskPct, useRunWorkflow, useZones } from "@/lib/queries";
 import type { PermitStatus } from "@/lib/api-types";
@@ -368,6 +374,15 @@ function AgentWorkflow() {
           )}
         </Panel>
       )}
+
+      {/* ── GEMMA AGENT LAYER ───────────────────────────────────────────────
+          Placed after the compliance answer because that is the execution
+          order: the permit verdict and the regulatory position are both settled
+          before Gemma proposes anything, and the gate authorises against them. */}
+      {run && run.tool_executions.length > 0 && <ToolExecutionStream run={run} />}
+      {run && <GemmaReasoningPanel run={run} />}
+      {run?.gemma_briefing && <OperatorBriefingPanel run={run} />}
+      {run && run.gemma_meta.length > 0 && <GemmaTelemetryStrip meta={run.gemma_meta} />}
 
       {stoodDown(run) && (
         <Panel

@@ -10,6 +10,7 @@ import type {
   AlertLogEntry,
   ClockResponse,
   ComplianceResponse,
+  GemmaStatus,
   HealthResponse,
   PermitDecisionResponse,
   PermitRequestBody,
