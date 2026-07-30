@@ -47,6 +47,9 @@ docs/
 !models/forecaster*.pkl
 data/external/
 
+# Reading copy of the submission writeup — kept local on purpose.
+NEW_WRITEUP.md
+
 # Scratch
 temp.txt
 *.log
