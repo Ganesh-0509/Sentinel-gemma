@@ -170,6 +170,34 @@ def health() -> S.HealthResponse:
     )
 
 
+@api.get("/gemma/status", response_model=S.GemmaStatus, tags=["system"])
+def gemma_status() -> S.GemmaStatus:
+    """Which Gemma model the agent layer will use, and whether it is reachable.
+
+    Resolved from Ollama's tag list rather than by generating, so the console can
+    populate its model badge on page load without spending a generation. That
+    matters here: a 4B model on CPU takes seconds per call, and a status badge is
+    not worth one.
+    """
+    from sentinel.agents.tools import REGISTRY
+    from sentinel.llm.gemma import get_gemma
+
+    g = get_gemma()
+    d = g.describe()
+    return S.GemmaStatus(
+        model=d["model"],
+        runtime=d["runtime"],
+        available=d["available"],
+        # Stated plainly because it shapes the whole architecture: Ollama has no
+        # tool-calling template for Gemma 3, so the model proposes actions as
+        # schema-constrained JSON and the deterministic gate executes them.
+        native_tool_calling=False,
+        tools=sorted(REGISTRY),
+        prose_backend=get_llm().backend,
+        prose_detail=get_llm().detail,
+    )
+
+
 # -------------------------------------------------------------------- plant
 @api.get("/zones", response_model=list[S.ZoneState], tags=["plant"])
 def zones() -> list[S.ZoneState]:
@@ -385,6 +413,15 @@ def run_workflow(zone_id: str) -> S.WorkflowResponse:
             ],
         )
     pdec = result.get("permit_decision")
+    plan = result.get("gemma_plan") or {}
+    refl = result.get("gemma_reflection")
+    brief = result.get("gemma_briefing")
+    # Confidence is surfaced but explicitly not acted on: a 4B model reporting
+    # 0.95 on a zone the rule engine cleared is not evidence of anything, and the
+    # gate in sentinel.agents.tools ignores it by design. Showing it lets an
+    # operator see the gap between what the agent believed and what it was
+    # allowed to do.
+    conf = plan.get("confidence")
     return S.WorkflowResponse(
         zone_id=zone_id,
         trace=result.get("trace", []),
@@ -394,6 +431,12 @@ def run_workflow(zone_id: str) -> S.WorkflowResponse:
         compliance=comp_model,
         actions=result.get("actions", []),
         report=result.get("report"),
+        tool_executions=[S.ToolReceipt(**r) for r in (result.get("tool_executions") or [])],
+        gemma_reasoning=(plan.get("reasoning") or None),
+        gemma_confidence=float(conf) if isinstance(conf, (int, float)) else None,
+        gemma_reflection=S.GemmaReflection(**refl) if refl else None,
+        gemma_briefing=S.GemmaBriefing(**brief) if brief else None,
+        gemma_meta=[S.GemmaNodeMeta(**m) for m in (result.get("gemma_meta") or [])],
     )
 
 

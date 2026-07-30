@@ -250,6 +250,68 @@ export interface ComplianceResponse {
   confidence: Confidence;
 }
 
+/**
+ * One containment action Gemma proposed.
+ *
+ * `executed: false` is a normal, expected outcome, not an error. The gate in
+ * backend/agents/tools.py refuses any restrictive action the deterministic layer
+ * has not justified, and those refusals are rendered beside the executions —
+ * they are the visible proof that the model is not trusted blindly.
+ */
+export interface ToolReceipt {
+  tool: string;
+  executed: boolean;
+  /** Arguments exactly as the model returned them, before coercion. */
+  proposed: Record<string, unknown>;
+  /** Arguments after coercion to the real tool signature. Null when refused. */
+  arguments: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  refused_because: string | null;
+  elapsed_ms: number;
+}
+
+/** Per-node model telemetry. `gen_ms` excludes model load; see gemma.py. */
+export interface GemmaNodeMeta {
+  node: string;
+  model: string;
+  runtime: string;
+  latency_ms: number;
+  load_ms: number;
+  gen_ms: number;
+  eval_count: number;
+  prompt_count: number;
+  tokens_per_s: number;
+  truncated: boolean;
+}
+
+/** SHAP attributions rendered for a shift in-charge. */
+export interface GemmaBriefing {
+  headline: string;
+  why_now: string;
+  watch: string;
+}
+
+/** The agent's review of its own refused proposals. */
+export interface GemmaReflection {
+  accepted: boolean;
+  correction: string;
+  residual_risk: string;
+}
+
+export interface GemmaStatus {
+  model: string;
+  runtime: string;
+  available: boolean;
+  /**
+   * False for Gemma 3 on Ollama, which has no tool-calling template. Actions are
+   * proposed as schema-constrained JSON and executed by the deterministic gate.
+   */
+  native_tool_calling: boolean;
+  tools: string[];
+  prose_backend: string;
+  prose_detail: string;
+}
+
 export interface WorkflowResponse {
   zone_id: string;
   trace: string[];
@@ -259,6 +321,17 @@ export interface WorkflowResponse {
   compliance: ComplianceResponse | null;
   actions: string[];
   report: string | null;
+  tool_executions: ToolReceipt[];
+  gemma_reasoning: string | null;
+  /**
+   * The model's self-reported confidence. Displayed for transparency only — the
+   * safety gate ignores it by design, so a high value next to a refused action
+   * is informative rather than contradictory.
+   */
+  gemma_confidence: number | null;
+  gemma_reflection: GemmaReflection | null;
+  gemma_briefing: GemmaBriefing | null;
+  gemma_meta: GemmaNodeMeta[];
 }
 
 export interface SimulationRequest {

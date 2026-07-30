@@ -193,24 +193,45 @@ class Refusal(Exception):
     """A proposal that will not be executed, carrying the reason why."""
 
 
+# Arguments the model is never allowed to supply, because they identify real
+# things in a real plant. A wrong value here is not a degraded action, it is an
+# action against the wrong object -- or a fabricated reference in an audit trail
+# that a statutory investigation will later rely on.
+#
+# `gemma3:latest` produced both failure modes unprompted: a permit reference of
+# "HOT-WORK-4-23" for a system that issues no permit numbers, and a muster point
+# of "Docking Bay Alpha" for a plant that has no such location. Both were
+# plausible, neither was real, and an invented assembly point in an evacuation
+# order is the most dangerous output in this file.
+_CALLER_AUTHORITATIVE = frozenset({"zone_id", "permit_id", "muster_point"})
+
+
 def _coerce(name: str, raw: dict[str, Any], zone_id: str,
             permit_id: str | None) -> dict[str, Any]:
     """Fit proposed arguments to the tool's real signature.
 
-    Missing values are filled from the zone context the workflow already holds
-    rather than from the model, because the workflow's copy is authoritative:
-    the model has renamed and misspelled zone ids, and a containment action
-    aimed at the wrong zone is worse than no action.
+    Values that identify plant objects come from the workflow, which holds the
+    authoritative copy. Values that are advisory prose -- a reason, a team name --
+    may come from the model, since a poor phrasing is visible to the operator
+    reading it and cannot misdirect an action.
     """
     spec = REGISTRY[name]
     supplied = {k.lower(): v for k, v in (raw or {}).items()}
     out: dict[str, Any] = {}
     for arg, coerce in spec.args.items():
         if arg == "zone_id":
-            out[arg] = zone_id                     # never taken from the model
+            out[arg] = zone_id
             continue
         if arg == "permit_id":
-            out[arg] = permit_id or str(supplied.get("permit_id") or "UNKNOWN")
+            # No permit numbering exists upstream: PermitDecision carries a
+            # status, reasons and checks, but no id. So the reference is derived
+            # from the zone, which is what the rule engine actually evaluated --
+            # "the hot-work permit for Zone-4" -- rather than accepting a number
+            # the model made up to fill the field.
+            out[arg] = permit_id or f"HOTWORK-{zone_id}"
+            continue
+        if arg == "muster_point":
+            out[arg] = _DEFAULTS["muster_point"]
             continue
         val = supplied.get(arg)
         if val is None:

@@ -83,6 +83,7 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
   // ---------------------------------------------------------------- system
   health: () => request<HealthResponse>("/health"),
+  gemmaStatus: () => request<GemmaStatus>("/gemma/status"),
 
   // ----------------------------------------------------------------- plant
   zones: () => request<ZoneState[]>("/zones"),

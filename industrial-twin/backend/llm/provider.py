@@ -1,12 +1,26 @@
-"""LLM provider abstraction: Gemini primary, Ollama fallback, extractive last resort.
+"""LLM provider abstraction for free prose: local Gemma first, then cloud, then extractive.
 
 Safety systems must degrade, never disappear. The chain is:
 
-    1. Gemini (cloud)   -- best quality, needs GEMINI_API_KEY
-    2. Ollama (local)   -- no API key, no internet; the demo cannot be killed by
-                           venue wifi and plant data never leaves the site
-    3. Extractive       -- no generation at all: return the retrieved source text
-                           verbatim. Degraded, but still cites real regulation.
+    1. Gemma via Ollama  -- local, no API key, no internet. Plant telemetry never
+                            leaves the site and the demo cannot be killed by
+                            venue wifi.
+    2. Gemini (cloud)    -- opt-in, needs GEMINI_API_KEY *and*
+                            SENTINEL_LLM_PREFER=gemini
+    3. Extractive        -- no generation at all: return the retrieved source
+                            text verbatim. Degraded, but still cites real
+                            regulation.
+
+Local is the default tier rather than the fallback. This used to run Gemini first
+and drop to `llama3.1:8b` locally, which meant the compliance answer and the
+regulatory notification -- the two most visible pieces of prose in the console --
+were written by whichever model happened to be reachable. Running Gemma at both
+tiers makes the whole system one model family, and keeps it working with the
+network unplugged.
+
+Structured agent reasoning does not go through here. It lives in `gemma.py`,
+which constrains decoding to a JSON Schema; this module is only for prose, where
+there is no schema to enforce and a paragraph is the deliverable.
 
 Nothing on the safety-critical path (forecaster, rule engine) depends on this
 module. If every tier fails, hard interlocks still enforce.
@@ -19,7 +33,10 @@ import urllib.error
 import urllib.request
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
+# The local tier runs the same Gemma model as the agent layer in `gemma.py`,
+# so the console is not quietly a mix of two model families.
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL") or os.environ.get(
+    "GEMMA_MODEL", "gemma3:latest")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 GEMINI_URL = os.environ.get(
     "GEMINI_URL", "https://generativelanguage.googleapis.com/v1beta")
@@ -38,7 +55,11 @@ class LLMProvider:
         self._gemini = None
         self._gemini_key: str | None = None
 
-        order = [prefer] if prefer else ["gemini", "ollama"]
+        # Local Gemma leads. Reaching the cloud now takes an explicit opt-in, so
+        # a stray GEMINI_API_KEY in the environment cannot silently move
+        # inference off-site during a demo that is meant to be running locally.
+        prefer = prefer or os.environ.get("SENTINEL_LLM_PREFER") or None
+        order = [prefer] if prefer else ["ollama", "gemini"]
         if prefer and prefer != "extractive":
             order = [prefer]
 

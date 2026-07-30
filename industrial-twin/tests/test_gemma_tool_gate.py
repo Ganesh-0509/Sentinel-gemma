@@ -61,6 +61,33 @@ def test_zone_id_is_never_taken_from_the_model():
     assert r["arguments"]["zone_id"] == "Zone-4"
 
 
+def test_invented_permit_number_is_discarded():
+    """Regression: the model offered "HOT-WORK-4-23" for a system with no permit
+    numbering, and it reached the executed action. A fabricated reference in an
+    audit trail is worse than an obviously derived one."""
+    r = execute_plan(
+        {"tool_calls": [{"name": "veto_permit",
+                         "arguments": {"permit_id": "HOT-WORK-4-23", "reason": "gas"}}]},
+        zone_id="Zone-4", permit_id=None, escalated=True, permit_rejected=True)[0]
+    assert r["executed"]
+    assert r["arguments"]["permit_id"] == "HOTWORK-Zone-4"
+    # The proposal is still recorded, so the console can show what was asked for.
+    assert r["proposed"]["permit_id"] == "HOT-WORK-4-23"
+
+
+def test_invented_muster_point_is_discarded():
+    """The model offered "Docking Bay Alpha". An invented assembly point in an
+    evacuation order is the most dangerous output this module can emit."""
+    r = _run({"tool_calls": [
+        {"name": "dispatch_response_team",
+         "arguments": {"team": "Hazmat Response", "muster_point": "Docking Bay Alpha"}},
+    ]})[0]
+    assert r["executed"]
+    assert r["arguments"]["muster_point"] == "primary assembly point"
+    # A team name is advisory prose, not an identifier, so it passes through.
+    assert r["arguments"]["team"] == "Hazmat Response"
+
+
 def test_non_numeric_airflow_is_clamped_into_range():
     r = _run({"tool_calls": [
         {"name": "adjust_ventilation", "arguments": {"target_cfm": 999999}},

@@ -6,7 +6,13 @@
                                   |
                              compliance
                                   |
-                    [advisory | emergency_orchestrator] -> END
+              +-------------------+-------------------+
+              |                                       |
+       gemma_containment                        advisory
+              |                                       |
+       gemma_reflection                        gemma_advisor -> END
+              |
+      emergency_orchestrator -> END
 
 Division of labour -- this is the important design decision:
 
@@ -14,12 +20,22 @@ Division of labour -- this is the important design decision:
         Anything that can stop work or clear work is plain auditable logic. An
         LLM never decides whether a hot-work permit is safe.
 
+    GEMMA agents: gemma_containment (proposes tool calls), gemma_reflection
+        (audits its own refused proposals), gemma_advisor (SHAP attributions ->
+        operator briefing). See `gemma_nodes.py`.
+
     LLM agents: compliance (grounded RAG, cites sources), emergency_orchestrator
         (drafts the regulatory notification). Both operate on language, after the
         safety decision has already been made deterministically.
 
 So the agents add autonomy in *coordination and communication*, not in the safety
 verdict itself. That is the honest answer to "why agents?".
+
+The Gemma layer keeps that property. `gemma_containment` runs after the permit
+verdict and the interlocks are settled, and every action it proposes passes
+through the gate in `tools.py`, which authorises against the deterministic
+verdict rather than against the model's confidence. Gemma widens what the system
+can *do* autonomously without widening what it is allowed to decide.
 """
 from __future__ import annotations
 
@@ -76,6 +92,12 @@ class SafetyState(TypedDict, total=False):
     actions: list
     report: str
     trace: list
+    # --- produced by the Gemma agent layer (gemma_nodes.py) ---
+    gemma_plan: dict          # the containment proposal, as the model returned it
+    tool_executions: list     # one receipt per proposal: executed or refused
+    gemma_reflection: dict    # the model's review of its own refusals
+    gemma_briefing: dict      # SHAP attributions rendered for an operator
+    gemma_meta: list          # per-node model + latency telemetry for the console
 
 
 def _log(state: SafetyState, agent: str, msg: str) -> list:
@@ -397,12 +419,21 @@ def route_after_compliance(state: SafetyState) -> str:
 
 
 def build_safety_graph():
+    from sentinel.agents.gemma_nodes import (
+        gemma_advisor,
+        gemma_containment,
+        gemma_reflection,
+    )
+
     g = StateGraph(SafetyState)
     g.add_node("risk_monitor", risk_monitor)
     g.add_node("permit_intelligence", permit_intelligence)
     g.add_node("compliance", compliance)
+    g.add_node("gemma_containment", gemma_containment)
+    g.add_node("gemma_reflection", gemma_reflection)
     g.add_node("emergency_orchestrator", emergency_orchestrator)
     g.add_node("advisory", advisory)
+    g.add_node("gemma_advisor", gemma_advisor)
     g.add_node("monitor_only", monitor_only)
 
     g.set_entry_point("risk_monitor")
@@ -411,9 +442,19 @@ def build_safety_graph():
                              "stand_down": "monitor_only"})
     g.add_edge("permit_intelligence", "compliance")
     g.add_conditional_edges("compliance", route_after_compliance,
-                            {"emergency": "emergency_orchestrator", "advisory": "advisory"})
+                            {"emergency": "gemma_containment", "advisory": "advisory"})
+    # Containment proposes and executes through the gate, then reviews its own
+    # refusals, and only then does the deterministic orchestrator list the human
+    # response actions and draft the notification. That order matters: the
+    # notification should describe what was actually done to the plant, so it has
+    # to be written after the tools have run.
+    g.add_edge("gemma_containment", "gemma_reflection")
+    g.add_edge("gemma_reflection", "emergency_orchestrator")
     g.add_edge("emergency_orchestrator", END)
-    g.add_edge("advisory", END)
+    # The advisory path stays cheap: one Gemma call to turn the model's drivers
+    # into a briefing, after the deterministic conditional controls are chosen.
+    g.add_edge("advisory", "gemma_advisor")
+    g.add_edge("gemma_advisor", END)
     g.add_edge("monitor_only", END)
     return g.compile()
 

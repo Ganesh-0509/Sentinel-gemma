@@ -273,6 +273,67 @@ class ComplianceResponse(BaseModel):
                     "SOP; high = a standard matched confidently.")
 
 
+class GemmaStatus(BaseModel):
+    """Identity of the model behind the agent layer, for the console badge."""
+    model: str
+    runtime: str
+    available: bool
+    native_tool_calling: bool = Field(
+        description="False for Gemma 3 on Ollama, which has no tool-calling "
+                    "template. Actions are proposed as schema-constrained JSON "
+                    "and executed by the deterministic gate instead.")
+    tools: list[str] = Field(default_factory=list)
+    prose_backend: str = Field(description="Backend used for free prose")
+    prose_detail: str = ""
+
+
+class ToolReceipt(BaseModel):
+    """One containment action Gemma proposed, executed or refused.
+
+    Refusals are returned, not filtered. The console renders them beside the
+    executions because a withheld action is the visible evidence that the
+    deterministic gate in `sentinel.agents.tools` is doing its job -- and an
+    operator reviewing an incident needs to know what the agent wanted to do.
+    """
+    tool: str
+    executed: bool
+    proposed: dict = Field(default_factory=dict,
+                           description="Arguments exactly as the model returned them")
+    arguments: dict | None = Field(
+        default=None, description="Arguments after coercion to the tool signature")
+    result: dict | None = None
+    refused_because: str | None = None
+    elapsed_ms: float = 0.0
+
+
+class GemmaNodeMeta(BaseModel):
+    """Per-node model telemetry, so the console can prove where inference ran."""
+    node: str
+    model: str
+    runtime: str
+    latency_ms: int
+    load_ms: int = 0
+    gen_ms: int = 0
+    eval_count: int = 0
+    prompt_count: int = 0
+    tokens_per_s: float = 0.0
+    truncated: bool = False
+
+
+class GemmaBriefing(BaseModel):
+    """SHAP attributions rendered for a shift in-charge."""
+    headline: str = ""
+    why_now: str = ""
+    watch: str = ""
+
+
+class GemmaReflection(BaseModel):
+    """The agent's review of its own refused proposals."""
+    accepted: bool = False
+    correction: str = ""
+    residual_risk: str = ""
+
+
 class WorkflowResponse(BaseModel):
     zone_id: str
     trace: list[str] = Field(description="Ordered agent execution trace")
@@ -282,6 +343,19 @@ class WorkflowResponse(BaseModel):
     compliance: ComplianceResponse | None = None
     actions: list[str] = Field(default_factory=list)
     report: str | None = Field(default=None, description="Draft regulatory notification")
+    # --- Gemma agent layer ---
+    tool_executions: list[ToolReceipt] = Field(
+        default_factory=list,
+        description="Containment actions proposed by Gemma, with gate verdicts")
+    gemma_reasoning: str | None = Field(
+        default=None, description="The containment agent's stated rationale")
+    gemma_confidence: float | None = Field(
+        default=None,
+        description="The model's self-reported confidence. Reported for "
+                    "transparency only; it is not an input to the safety gate.")
+    gemma_reflection: GemmaReflection | None = None
+    gemma_briefing: GemmaBriefing | None = None
+    gemma_meta: list[GemmaNodeMeta] = Field(default_factory=list)
 
 
 class SimulationRequest(BaseModel):
